@@ -17,6 +17,7 @@
 #define BUFFER_SIZE 4096
 
 static int client_enabled = 0;
+static int running = 0;
 static int sd = 0;
 static char recv_buffer[QUEUE_SIZE] = {0};
 static thrd_t recv_thread;
@@ -60,6 +61,15 @@ void client_send(char *data) {
     }
 }
 
+void client_version(int version) {
+    if (!client_enabled) {
+        return;
+    }
+    char buffer[1024];
+    snprintf(buffer, 1024, "V,%d\n", version);
+    client_send(buffer);
+}
+
 void client_position(float x, float y, float z, float rx, float ry) {
     if (!client_enabled) {
         return;
@@ -98,6 +108,15 @@ void client_block(int x, int y, int z, int w) {
     client_send(buffer);
 }
 
+void client_sign(int x, int y, int z, int face, const char *text) {
+    if (!client_enabled) {
+        return;
+    }
+    char buffer[1024];
+    snprintf(buffer, 1024, "S,%d,%d,%d,%d,%s\n", x, y, z, face, text);
+    client_send(buffer);
+}
+
 void client_talk(char *text) {
     if (!client_enabled) {
         return;
@@ -132,8 +151,13 @@ int recv_worker(void *arg) {
     while (1) {
         char data[BUFFER_SIZE] = {0};
         if (recv(sd, data, BUFFER_SIZE - 1, 0) <= 0) {
-            perror("recv");
-            exit(1);
+            if (running) {
+                perror("recv");
+                exit(1);
+            }
+            else {
+                break;
+            }
         }
         while (1) {
             int done = 0;
@@ -180,6 +204,7 @@ void client_start() {
     if (!client_enabled) {
         return;
     }
+    running = 1;
     mtx_init(&mutex, mtx_plain);
     if (thrd_create(&recv_thread, recv_worker, NULL) != thrd_success) {
         perror("thrd_create");
@@ -191,10 +216,11 @@ void client_stop() {
     if (!client_enabled) {
         return;
     }
+    running = 0;
     close(sd);
-    if (thrd_join(recv_thread, NULL) != thrd_success) {
-        perror("thrd_join");
-        exit(1);
-    }
-    mtx_destroy(&mutex);
+    // if (thrd_join(recv_thread, NULL) != thrd_success) {
+    //     perror("thrd_join");
+    //     exit(1);
+    // }
+    // mtx_destroy(&mutex);
 }
