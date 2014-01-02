@@ -11,7 +11,7 @@
 #define DB_PATH "craft.db"
 #define USE_CACHE 1
 #define DAY_LENGTH 300
-#define INVERT_MOUSE 0
+#define INVERT_MOUSE 1
 
 // rendering options
 #define SHOW_PLANTS 1
