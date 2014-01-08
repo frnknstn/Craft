@@ -2,6 +2,7 @@
 #define _config_h_
 
 // app parameters
+#define DEBUG 0
 #define FULLSCREEN 0
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 768
@@ -53,6 +54,7 @@
 // advanced parameters
 #define CREATE_CHUNK_RADIUS 6
 #define RENDER_CHUNK_RADIUS 6
+#define RENDER_SIGN_RADIUS 3
 #define DELETE_CHUNK_RADIUS 12
 #define CHUNK_SIZE 32
 #define COMMIT_INTERVAL 5

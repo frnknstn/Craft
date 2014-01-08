@@ -10,32 +10,34 @@ import threading
 import time
 import traceback
 
-HOST = '0.0.0.0'
-PORT = 4080
+DEFAULT_HOST = '0.0.0.0'
+DEFAULT_PORT = 4080
+
 DB_PATH = 'craft.db'
 LOG_PATH = 'log.txt'
 
 CHUNK_SIZE = 32
-BUFFER_SIZE = 1024
+BUFFER_SIZE = 4096
 COMMIT_INTERVAL = 5
 
 SPAWN_POINT = (0, 0, 0, 0, 0)
+RATE_LIMIT = False
 ALLOWED_ITEMS = set([
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     17, 18, 19, 20, 21, 22, 23,
     32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63])
 
-YOU = 'U'
 BLOCK = 'B'
 CHUNK = 'C'
-POSITION = 'P'
 DISCONNECT = 'D'
-TALK = 'T'
 KEY = 'K'
 NICK = 'N'
+POSITION = 'P'
 SIGN = 'S'
+TALK = 'T'
 VERSION = 'V'
+YOU = 'U'
 
 def log(*args):
     now = datetime.datetime.utcnow()
@@ -54,6 +56,8 @@ class RateLimiter(object):
         self.allowance = self.rate
         self.last_check = time.time()
     def tick(self):
+        if not RATE_LIMIT:
+            return False
         now = time.time()
         elapsed = now - self.last_check
         self.last_check = now
@@ -87,7 +91,7 @@ class Handler(SocketServer.BaseRequestHandler):
                 data = self.request.recv(BUFFER_SIZE)
                 if not data:
                     break
-                buf.extend(data.replace('\r', ''))
+                buf.extend(data.replace('\r\n', '\n'))
                 while '\n' in buf:
                     index = buf.index('\n')
                     line = ''.join(buf[:index])
@@ -289,8 +293,8 @@ class Model(object):
             'insert or replace into block (p, q, x, y, z, w) '
             'values (:p, :q, :x, :y, :z, :w);'
         )
-        self.execute(query, dict(p=p, q=q, x=x, y=y, z=z, w=w))
-        self.send_block(client, p, q, x, y, z, w)
+        cur = self.execute(query, dict(p=p, q=q, x=x, y=y, z=z, w=w))
+        self.send_block(client, p, q, x, y, z, w, cur.lastrowid)
         for dx in range(-1, 2):
             for dz in range(-1, 2):
                 if dx == 0 and dz == 0:
@@ -300,8 +304,8 @@ class Model(object):
                 if dz and chunked(z + dz) == q:
                     continue
                 np, nq = p + dx, q + dz
-                self.execute(query, dict(p=np, q=nq, x=x, y=y, z=z, w=-w))
-                self.send_block(client, np, nq, x, y, z, -w)
+                cur = self.execute(query, dict(p=np, q=nq, x=x, y=y, z=z, w=-w))
+                self.send_block(client, np, nq, x, y, z, -w, cur.lastrowid)
         if w == 0:
             query = (
                 'delete from sign where '
@@ -346,6 +350,15 @@ class Model(object):
                     break
             else:
                 client.send(TALK, 'Unrecognized command: "%s"' % text)
+        elif text.startswith('@'):
+            nick = text[1:].split(' ', 1)[0]
+            for other in self.clients:
+                if other.nick == nick:
+                    client.send(TALK, '%s> %s' % (client.nick, text))
+                    other.send(TALK, '%s> %s' % (client.nick, text))
+                    break
+            else:
+                client.send(TALK, 'Unrecognized nick: "%s"' % nick)
         else:
             self.send_talk('%s> %s' % (client.nick, text))
     def on_nick(self, client, nick=None):
@@ -362,7 +375,7 @@ class Model(object):
     def on_goto(self, client, nick=None):
         if nick is None:
             clients = [x for x in self.clients if x != client]
-            other = random.choice(self.clients) if clients else None
+            other = random.choice(clients) if clients else None
         else:
             nicks = dict((client.nick, client) for client in self.clients)
             other = nicks.get(nick)
@@ -408,11 +421,12 @@ class Model(object):
             if other == client:
                 continue
             other.send(DISCONNECT, client.client_id)
-    def send_block(self, client, p, q, x, y, z, w):
+    def send_block(self, client, p, q, x, y, z, w, key):
         for other in self.clients:
             if other == client:
                 continue
             other.send(BLOCK, p, q, x, y, z, w)
+            other.send(KEY, p, q, key)
     def send_sign(self, client, p, q, x, y, z, face, text):
         for other in self.clients:
             if other == client:
@@ -424,7 +438,7 @@ class Model(object):
             client.send(TALK, text)
 
 def main():
-    host, port = HOST, PORT
+    host, port = DEFAULT_HOST, DEFAULT_PORT
     if len(sys.argv) > 1:
         host = sys.argv[1]
     if len(sys.argv) > 2:
